@@ -3,7 +3,7 @@ services:
   laravel-php-httpd-tcp:
     build:
       context: ./docker
-      dockerfile: php.pgsql.Dockerfile
+      dockerfile: php.mysql.Dockerfile
       target: php-base
     container_name: laravel-php-httpd-tcp
     restart: unless-stopped
@@ -14,8 +14,9 @@ services:
       XDEBUG_CLIENT_HOST: ${XDEBUG_CLIENT_HOST}
     networks:
       - laravel-httpd-tcp-network
-      - postgres-dev-network
-      # - mysql-dev-network
+      - mysql-dev-network
+      # - postgres-dev-network
+
     healthcheck:
       # Проверка доступности FPM через TCP
       test:
@@ -54,8 +55,8 @@ networks:
   redis-cluster-dev:
     external: true
 
-  postgres-dev-network:
-    external: true
-
   mysql-dev-network:
     external: true
+
+#  postgres-dev-network:
+#    external: true
