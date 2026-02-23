@@ -1,0 +1,42 @@
+services:
+  # Настройки PHP для разработки (монтирование кода)
+  laravel-php-httpd-tcp:
+    volumes:
+      - .:/var/www/laravel
+
+  # Настройки Httpd для разработки
+  laravel-httpd-tcp:
+    ports:
+      - "${HTTPD_PORT}:80"
+    volumes:
+      - .:/var/www/laravel
+    depends_on:
+      - laravel-node-httpd-tcp
+
+  # Node.js для сборки фронтенда и Hot Module Replacement (HMR)
+  laravel-node-httpd-tcp:
+    image: node:24-alpine
+    container_name: laravel-node-httpd-tcp
+    working_dir: /var/www/laravel
+    volumes:
+      - .:/var/www/laravel
+      - node_modules:/var/www/laravel/node_modules
+    command: >
+      sh -lc '
+        # Установка зависимостей, если они отсутствуют
+        if [ -f package-lock.json ]; then
+          npm ci;
+        else
+          npm install;
+        fi;
+      
+        # Запуск Vite в режиме разработки
+        npm run dev -- --host 0.0.0.0 --port 5173
+      '
+    ports:
+      - "5173:5173"
+    networks:
+      - laravel-httpd-tcp-network
+
+volumes:
+  node_modules:

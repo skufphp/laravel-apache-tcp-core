@@ -1,0 +1,61 @@
+services:
+  # Основной контейнер Laravel PHP-FPM
+  laravel-php-httpd-tcp:
+    build:
+      context: ./docker
+      dockerfile: php.pgsql.Dockerfile
+      target: php-base
+    container_name: laravel-php-httpd-tcp
+    restart: unless-stopped
+    working_dir: /var/www/laravel
+    environment:
+      XDEBUG_MODE: ${XDEBUG_MODE}
+      XDEBUG_START: ${XDEBUG_START}
+      XDEBUG_CLIENT_HOST: ${XDEBUG_CLIENT_HOST}
+    networks:
+      - laravel-httpd-tcp-network
+      - postgres-dev-network
+      # - mysql-dev-network
+    healthcheck:
+      # Проверка доступности FPM через TCP
+      test:
+        [
+          "CMD-SHELL",
+          "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q 'pong'"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Веб-сервер Httpd (Proxy)
+  laravel-httpd-tcp:
+    build:
+      context: ./docker
+      dockerfile: httpd.Dockerfile
+    container_name: laravel-httpd-tcp
+    restart: unless-stopped
+    networks:
+      - laravel-httpd-tcp-network
+    healthcheck:
+      test: [ "CMD", "httpd", "-t" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      laravel-php-httpd-tcp:
+        condition: service_healthy
+
+networks:
+  laravel-httpd-tcp-network:
+    driver: bridge
+
+  redis-cluster-dev:
+    external: true
+
+  postgres-dev-network:
+    external: true
+
+  mysql-dev-network:
+    external: true
