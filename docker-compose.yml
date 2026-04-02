@@ -1,62 +1,149 @@
 services:
   # Основной контейнер Laravel PHP-FPM
-  laravel-php-httpd-tcp:
+  laravel-php-apache-tcp-core:
     build:
-      context: ./docker
-      dockerfile: php.mysql.Dockerfile
-      target: php-base
-    container_name: laravel-php-httpd-tcp
+      context: .
+      dockerfile: docker/php.Dockerfile
+      target: development
+      args:
+        INSTALL_XDEBUG: "true"
+    image: laravel-php-apache-tcp-core:dev
+    pull_policy: never
+    container_name: laravel-php-apache-tcp-core
     restart: unless-stopped
     working_dir: /var/www/laravel
+    volumes:
+      - .:/var/www/laravel
     environment:
+      APP_BASE_PATH: ${APP_BASE_PATH:-/var/www/laravel}
       XDEBUG_MODE: ${XDEBUG_MODE}
       XDEBUG_START: ${XDEBUG_START}
       XDEBUG_CLIENT_HOST: ${XDEBUG_CLIENT_HOST}
     networks:
-      - laravel-httpd-tcp-network
+      - laravel-apache-tcp-core-network
+      - postgres-dev-network
       - mysql-dev-network
-      # - postgres-dev-network
-
+      - redis
     healthcheck:
-      # Проверка доступности FPM через TCP
+      # Проверка доступности FPM через TCP-порт 9000
       test:
         [
           "CMD-SHELL",
-          "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q 'pong'"
+          "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect localhost:9000 | grep -q 'pong'"
         ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
-  # Веб-сервер Httpd (Proxy)
-  laravel-httpd-tcp:
+  # Веб-сервер Apache (Proxy)
+  laravel-apache-tcp-core:
     build:
-      context: ./docker
-      dockerfile: httpd.Dockerfile
-    container_name: laravel-httpd-tcp
+      context: .
+      dockerfile: docker/httpd.Dockerfile
+      target: development
+    image: laravel-apache-tcp-core:dev
+    pull_policy: never
+    container_name: laravel-apache-tcp-core
     restart: unless-stopped
+    volumes:
+      - .:/var/www/laravel
+    ports:
+      - "${HTTPD_PORT:-8050}:80"
     networks:
-      - laravel-httpd-tcp-network
+      - laravel-apache-tcp-core-network
+    depends_on:
+      laravel-php-apache-tcp-core:
+        condition: service_healthy
     healthcheck:
-      test: [ "CMD", "httpd", "-t" ]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost/ > /dev/null 2>&1 || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Node.js для сборки фронтенда и Hot Module Replacement (HMR)
+  laravel-node-apache-tcp-core:
+    image: node:24-alpine
+    container_name: laravel-node-apache-tcp-core
+    restart: unless-stopped
+    working_dir: /var/www/laravel
+    volumes:
+      - .:/var/www/laravel
+      - node_modules:/var/www/laravel/node_modules
+    command: >
+      sh -lc '
+        # Установка зависимостей, если они отсутствуют
+        if [ -f package-lock.json ]; then
+          npm ci;
+        else
+          npm install;
+        fi;
+
+        # Запуск Vite в режиме разработки
+        npm run dev -- --host 0.0.0.0 --port 5173
+      '
+    ports:
+      - "5173:5173"
+    networks:
+      - laravel-apache-tcp-core-network
+
+  # Laravel Queue Worker — обработка фоновых задач
+  laravel-queue-apache-tcp-core:
+    image: laravel-php-apache-tcp-core:dev
+    container_name: laravel-queue-apache-tcp-core
+    pull_policy: never
+    restart: unless-stopped
+    working_dir: /var/www/laravel
+    volumes:
+      - .:/var/www/laravel
+    command: [ "php", "artisan", "queue:work", "--sleep=1", "--tries=1" ]
+    networks:
+      - laravel-apache-tcp-core-network
+      - postgres-dev-network
+      - mysql-dev-network
+      - redis
     depends_on:
-      laravel-php-httpd-tcp:
+      laravel-php-apache-tcp-core:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "ps aux | grep -v grep | grep 'queue:work' >/dev/null || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Laravel Scheduler — запуск периодических задач (cron)
+  laravel-scheduler-apache-tcp-core:
+    image: laravel-php-apache-tcp-core:dev
+    container_name: laravel-scheduler-apache-tcp-core
+    pull_policy: never
+    restart: unless-stopped
+    working_dir: /var/www/laravel
+    volumes:
+      - .:/var/www/laravel
+    command: [ "php", "artisan", "schedule:work" ]
+    networks:
+      - laravel-apache-tcp-core-network
+      - postgres-dev-network
+      - mysql-dev-network
+      - redis
+    depends_on:
+      laravel-php-apache-tcp-core:
         condition: service_healthy
 
+volumes:
+  node_modules:
+
 networks:
-  laravel-httpd-tcp-network:
+  laravel-apache-tcp-core-network:
     driver: bridge
 
-  redis-cluster-dev:
+  redis:
+    external: true
+
+  postgres-dev-network:
     external: true
 
   mysql-dev-network:
     external: true
-
-#  postgres-dev-network:
-#    external: true

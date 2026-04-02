@@ -1,123 +1,126 @@
-# Laravel Boilerplate (PHP-FPM + Httpd TCP + External PostgreSQL/MySQL + External Redis Cluster)
+# Laravel Boilerplate (PHP-FPM + Apache Httpd TCP + External DB + External Redis)
 
-Этот репозиторий представляет собой **boilerplate** для быстрого развертывания Laravel-проектов с оптимизированной архитектурой взаимодействия сервисов и **внешней инфраструктурой** (БД и Redis не поднимаются в Docker Compose).
+Этот репозиторий представляет собой **boilerplate** для развертывания Laravel-проектов с архитектурой **PHP-FPM + Apache Httpd через TCP**. База данных и Redis — **внешние** (не поднимаются в Docker Compose).
 
 ## Особенности
 
-*   **Производительность:** связь между Httpd и PHP-FPM настроена через **TCP (порт 9000)**.
-*   **External infra friendly:** **PostgreSQL/MySQL и Redis Cluster — внешние**, подключение только через переменные окружения.
-*   **Автоматизация:** набор команд в `Makefile` для управления контейнерами и Laravel.
-*   **Xdebug:** готов к включению одной переменной в `.env`.
+*   **Простота:** связь между Apache Httpd и PHP-FPM через **TCP-порт 9000** внутри Docker-сети.
+*   **Гибкость БД:** поддержка **PostgreSQL** и **MySQL** (через выбор соответствующего Dockerfile).
+*   **External infra:** БД и Redis — внешние, подключение через переменные окружения.
+*   **Современный стек:**
+    *   **PHP 8.5** (Alpine) — с предустановленными расширениями.
+    *   **Apache Httpd 2.4** (Alpine) — оптимизированный конфиг для Laravel (Event MPM + mod_proxy_fcgi).
+    *   **Node.js 24** — Vite с HMR (только в dev).
+*   **Разделение окружений:** конфигурации для **Development** и **Production**.
+*   **Xdebug:** включается одной переменной в `.env`.
+*   **Makefile:** автоматизация всех рутинных операций.
 
 ## Структура проекта
 
-*   `docker/` — Docker-файлы и конфигурации для PHP и Httpd.
-*   `docker-compose.yml` — базовый app-скелет (php+httpd).
-*   `docker-compose.dev.yml` — dev-надстройки (ports, bind-mount, node/vite).
-*   `docker-compose.prod.yml` — prod-надстройки (image + migrate one-off).
-*   `SETUP.md` — инструкция по интеграции boilerplate в ваш Laravel проект.
+*   `docker/` — Dockerfiles и конфигурации для PHP и Apache Httpd.
+*   `docker-compose.yml` — Dev-конфигурация (PHP, Apache, Node/Vite, Queue, Scheduler).
+*   `docker-compose.prod.yml` — Prod-конфигурация для деплоя (Dokploy и т.п.).
+*   `docker-compose.prod.local.yml` — Локальный запуск prod-окружения (smoke test).
+*   `Makefile` — Автоматизация операций.
 
-## Быстрый старт
+## Быстрый старт (Development)
 
-1.  Создайте проект Laravel: `composer create-project laravel/laravel .`
+1.  Создайте проект Laravel:
+    ```bash
+    composer create-project laravel/laravel .
+    ```
 2.  Скопируйте файлы boilerplate в корень проекта.
-3.  Настройте `.env` (подключение к **внешнему PostgreSQL/MySQL** и **внешнему Redis Cluster**).
-4.  Запустите:
+3.  **Выберите Dockerfile** для вашей БД — переименуйте нужный в `php.Dockerfile`:
+    *   Для **PostgreSQL**: `mv docker/php.pgsql.Dockerfile docker/php.Dockerfile`
+    *   Для **MySQL**: `mv docker/php.mysql.Dockerfile docker/php.Dockerfile`
+    *   Удалите ненужный Dockerfile.
+4.  Настройте конфигурационные файлы Laravel (см. раздел ниже).
+5.  Настройте `.env` (подключение к **внешней БД** и **внешнему Redis**).
+6.  Запустите:
     ```bash
     make setup
     ```
 
-После завершения:
-*   Сайт: [http://localhost](http://localhost)
+**Готово!** Сайт доступен на http://localhost:8050 (или порт из `HTTPD_PORT`).
 
 ---
 
-## 📂 База данных: PostgreSQL / MySQL
+## Настройка конфигурационных файлов Laravel
 
-В этом boilerplate есть два Dockerfile для PHP:
+### Удаление лишних файлов
 
-- `docker/php.pgsql.Dockerfile` — PHP с расширениями `pdo_pgsql/pgsql`
-- `docker/php.mysql.Dockerfile` — PHP с расширениями `pdo_mysql/mysqli`
+Laravel по умолчанию создаёт `database/database.sqlite`. В этом стеке используется внешняя БД, поэтому удалите файл и добавьте маску в `.gitignore`:
 
-### 🔁 Как переключаться между PostgreSQL и MySQL
-
-1) В `docker-compose.yml` у сервиса `laravel-php-httpd-tcp` переключите `build.dockerfile`:
-
-```yml
-services:
-  laravel-php-httpd-tcp:
-    build:
-      context: ./docker
-      dockerfile: php.pgsql.Dockerfile # или php.mysql.Dockerfile
-      target: php-base
+```bash
+rm database/database.sqlite
 ```
 
-2) В `.env` Laravel выставьте корректный драйвер и порт:
+Добавьте в `.gitignore`:
 
-```dotenv
-# PostgreSQL
-DB_CONNECTION=pgsql
-DB_PORT=5432
-
-# MySQL
-# DB_CONNECTION=mysql
-# DB_PORT=3306
+```text
+database/*.sqlite
 ```
 
-3) Если вы подключаетесь к БД-контейнеру в Docker (а не к managed DB), убедитесь что app-сервис находится в той же сети.
-   В текущем шаблоне в `docker-compose.yml` по умолчанию подключена внешняя сеть `postgres-dev-network`.
-   При переключении БД не забудьте переключить и сеть у сервиса `laravel-php-httpd-tcp`: либо `postgres-dev-network`, либо `mysql-dev-network` (или удалите этот network, если БД вне Docker).
+### Обновление fallback-значений конфигурации
 
-   Пример (переключение делается прямо в `services.laravel-php-httpd-tcp.networks`):
-   ```yml
-   services:
-     laravel-php-httpd-tcp:
-       networks:
-         - laravel-httpd-tcp-network
-         - postgres-dev-network
-         # - mysql-dev-network
-   ```
+Laravel хранит дефолтные значения подключений в `config/`. По умолчанию они указывают на `sqlite` и `database`. Замените их на значения, соответствующие вашему стеку:
 
-### PostgreSQL: создание базы и подключение
+**`config/database.php`**
+```php
+// Для PostgreSQL:
+'default' => env('DB_CONNECTION', 'pgsql'),
+// Для MySQL:
+'default' => env('DB_CONNECTION', 'mysql'),
+```
 
-В external-модели (внешняя БД) Laravel **не создаёт базы данных** автоматически. Команда `php artisan migrate` создаёт таблицы, но не делает `CREATE DATABASE`.
+**`config/queue.php`**
+```php
+'default' => env('QUEUE_CONNECTION', 'redis'),
+// ...
+'batching' => [
+    'database' => env('DB_CONNECTION', 'pgsql'), // или 'mysql'
+],
+'failed' => [
+    'database' => env('DB_CONNECTION', 'pgsql'), // или 'mysql'
+],
+```
 
-Базу для проекта нужно создать заранее вручную (через SQL или админку).
+**`config/cache.php`**
+```php
+'default' => env('CACHE_STORE', 'redis'),
+```
 
-### 🧱 Шаблон: “1 проект = 1 база + 1 пользователь”
+**`config/session.php`**
+```php
+'driver' => env('SESSION_DRIVER', 'redis'),
+```
 
-Пример для проекта `app1`:
-- база: `app1_db`
-- пользователь: `app1_user`
-- пароль: `<PASSWORD_PLACEHOLDER>`
+> **Примечание:** Миграция `create_cache_table` создаёт таблицу `cache` в БД, но при `CACHE_STORE=redis` она не используется. Её можно удалить для чистоты или оставить как fallback.
 
-#### 1) Создание через SQL (рекомендуется)
+---
 
-1. **Подключитесь суперпользователем** (обычно `postgres`) через psql/pgAdmin/DataGrip.
-2. **Создайте пользователя**:
-   ```sql
-   CREATE ROLE app1_user WITH LOGIN PASSWORD '<PASSWORD_PLACEHOLDER>';
-   ```
-3. **Создайте базу** и назначьте владельца:
-   ```sql
-   CREATE DATABASE app1_db OWNER app1_user;
-   ```
-4. **Ограничьте доступ** (рекомендуется):
-   ```sql
-   REVOKE ALL ON DATABASE app1_db FROM PUBLIC;
-   GRANT CONNECT ON DATABASE app1_db TO app1_user;
-   ```
+## База данных: создание и подключение
 
-### 🔌 Настройка Laravel (.env)
+В external-модели Laravel **не создаёт базы данных** автоматически. `php artisan migrate` создаёт таблицы, но не делает `CREATE DATABASE`. Базу нужно создать заранее.
 
-В `.env` проекта выставьте:
+### PostgreSQL (.env)
 ```dotenv
 DB_CONNECTION=pgsql
-DB_HOST=<postgres_service_or_container_name>
+DB_HOST=<postgres_host>
 DB_PORT=5432
 DB_DATABASE=app1_db
 DB_USERNAME=app1_user
-DB_PASSWORD=<PASSWORD_PLACEHOLDER>
+DB_PASSWORD=<PASSWORD>
+```
+
+### MySQL (.env)
+```dotenv
+DB_CONNECTION=mysql
+DB_HOST=<mysql_host>
+DB_PORT=3306
+DB_DATABASE=app1_db
+DB_USERNAME=app1_user
+DB_PASSWORD=<PASSWORD>
 ```
 
 После изменения `.env` сбросьте кэш и запустите миграции:
@@ -126,13 +129,19 @@ php artisan config:clear
 php artisan migrate
 ```
 
-### 🧰 Если в PhpStorm/DataGrip не видно таблиц
+---
 
-Если миграции прошли, но в дереве базы пусто:
-1. Database tool window → ваш datasource → база `app1_db`.
-2. Откройте **Schemas…** (или Properties → Schemas).
-3. Отметьте схему **`public`**.
-4. Нажмите **Apply / OK** и сделайте **Refresh**.
+## Основные команды (Makefile)
+
+*   `make up` — Запустить проект (dev).
+*   `make up-prod` — Запустить проект (prod, локально).
+*   `make down` — Остановить контейнеры.
+*   `make setup` — Полная инициализация проекта.
+*   `make artisan CMD="migrate"` — Выполнить команду artisan.
+*   `make shell-php` — Войти в консоль PHP-контейнера.
+*   `make logs` — Просмотр логов.
+*   `make info` — Информация о проекте.
 
 ---
-Подробная инструкция по установке находится в файле [SETUP.md](SETUP.md).
+
+*Подробная инструкция по установке и настройке находится в [SETUP.md](SETUP.md).*
