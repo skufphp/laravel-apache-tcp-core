@@ -187,9 +187,6 @@ composer: ## Запустить команду composer (make composer CMD="inst
 npm-install: ## Установить NPM зависимости
 	$(COMPOSE) exec $(NODE_SERVICE) npm install
 
-npm-dev: ## Запустить Vite в режиме разработки (hot reload)
-	$(COMPOSE) exec $(NODE_SERVICE) npm run dev
-
 npm-build: ## Собрать фронтенд (внутри Node контейнера)
 	$(COMPOSE) exec $(NODE_SERVICE) npm run build
 
